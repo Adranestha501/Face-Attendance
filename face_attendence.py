@@ -6,10 +6,39 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime
 import time
+from cryptography.fernet import Fernet
+import numpy as np
 import ttkbootstrap as tb # type: ignore
 
 # Database File
 DB_FILE = 'attendance.db'
+
+# Encryption Setup
+KEY_FILE = 'secret.key'
+if not os.path.exists(KEY_FILE):
+    key = Fernet.generate_key()
+    with open(KEY_FILE, 'wb') as keyfile:
+        keyfile.write(key)
+else:
+    with open(KEY_FILE, 'rb') as keyfile:
+        key = keyfile.read()
+
+encryptor = Fernet(key)
+
+# Encrypt and save image
+def encrypt_and_save(image, filepath):
+    _, buffer = cv2.imencode('.jpg', image)
+    encrypted_data = encryptor.encrypt(buffer.tobytes())
+    with open(filepath, 'wb') as file:
+        file.write(encrypted_data)
+
+# Decrypt and load image
+def decrypt_and_load(filepath):
+    with open(filepath, 'rb') as file:
+        encrypted_data = file.read()
+    decrypted_data = encryptor.decrypt(encrypted_data)
+    nparr = np.frombuffer(decrypted_data, np.uint8)
+    return cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
 
 # Ensure required directories exist
 DATA_STORE_PATH = r'C:\Users\sejal\Face_Attendance'
@@ -90,7 +119,7 @@ def register_user():
             cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
             count += 1
             image_path = f"dataset/{student_id}_{username}.{count}.jpg"
-            cv2.imwrite(image_path, gray[y:y + h, x:x + w])
+            encrypt_and_save(gray[y:y + h, x:x + w], image_path)
 
         cv2.imshow('Registering Face', frame)
         if cv2.waitKey(1) & 0xFF == ord('q') or count >= 30:
@@ -117,9 +146,8 @@ def log_in():
     for filename in os.listdir('registered_faces'):
         if filename.endswith('.jpg'):
             student_id, username = filename.split('_')[0], filename.split('_')[1].split('.')[0]
-            img = cv2.imread(os.path.join('registered_faces', filename))
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            registered_faces[(student_id, username)] = gray
+            decrypted_img = decrypt_and_load(os.path.join('registered_faces', filename))
+            registered_faces[(student_id, username)] = decrypted_img
 
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
